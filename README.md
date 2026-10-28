@@ -17,7 +17,9 @@ XIAO D2 ──[ 1 MΩ 电阻 ]── 导电物体(铝箔 / 金属片) ── XIA
 
 ## 看曲线:方式一,纯网页(推荐)
 
-直接在 Chrome / Edge 里打开 `index.html`,或者访问 GitHub Pages 上的在线版本,点"连接串口"选择板子即可。
+在线版本:**https://yolaaandaw-dotcom.github.io/xiao-touch-sensor/**
+
+用 Chrome / Edge 打开上面的网址(或者本地双击 `index.html`),点"连接串口"选择板子即可。
 不需要安装任何东西。Safari、Firefox 和手机浏览器不支持 Web Serial。
 
 ## 看曲线:方式二,Python 服务
