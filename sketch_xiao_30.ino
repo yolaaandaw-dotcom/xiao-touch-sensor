@@ -4,11 +4,19 @@
   Wiring:
     D2 / GPIO4 (send) -- resistor -- conductive object -- D3 / GPIO5 (receive)
 
-  This preserves the sensing-network / CapacitiveSensorR4 behavior:
-    - 30 charge/discharge cycles per reported value
+  Based on the sensing-network / CapacitiveSensorR4 behavior:
+    - CYCLES_PER_READING charge/discharge cycles per reported value
     - accumulated GPIO polling-loop counts, not microseconds
-    - subtraction of the lowest total observed since startup
     - raw and smoothed values as: raw,smoothed
+
+  Changes for the level-based (four-height) direction sensor:
+    - 100 cycles per reading instead of 30: ~3x larger counts, better SNR,
+      ~50 readings/s instead of ~175. Level separation matters more than rate.
+    - No baseline subtraction on the board. The host tracks the baseline and
+      recalibrates, so the board just reports the raw accumulated count.
+    - A sensing timeout prints a line starting with '#' instead of -2, so a
+      host that ignores comment lines never sees a bogus sample.
+    - Send 'r' from the host to reset the smoothing filter.
 
   Adapted from CapacitiveSensorR4 by Takanori Fujiwara and S. Sandra Bae,
   which refers to Paul Badger's CapacitiveSensor library.
@@ -19,10 +27,9 @@
 
 constexpr uint8_t SEND_PIN = D2;
 constexpr uint8_t RECEIVE_PIN = D3;
-constexpr uint8_t CYCLES_PER_READING = 30;
+constexpr uint8_t CYCLES_PER_READING = 100;
 constexpr uint32_t DISCHARGE_US = 100;
 constexpr uint32_t EDGE_TIMEOUT_US = 50000;
-constexpr uint32_t BASELINE_START = 0x0FFFFFFFUL;
 constexpr float EMA_ALPHA = 0.35F;
 
 class MedianEmaFilter
@@ -102,23 +109,6 @@ public:
     pinMode(sendPin_, OUTPUT);
     digitalWrite(sendPin_, LOW);
     pinMode(receivePin_, INPUT);
-    resetBaseline();
-  }
-
-  long read(uint8_t cycles)
-  {
-    const long rawTotal = readRaw(cycles);
-    if (rawTotal < 0)
-    {
-      return rawTotal;
-    }
-
-    const uint32_t total = static_cast<uint32_t>(rawTotal);
-    if (total < leastTotal_)
-    {
-      leastTotal_ = total;
-    }
-    return static_cast<long>(total - leastTotal_);
   }
 
   long readRaw(uint8_t cycles)
@@ -137,11 +127,6 @@ public:
       }
     }
     return static_cast<long>(total);
-  }
-
-  void resetBaseline()
-  {
-    leastTotal_ = BASELINE_START;
   }
 
 private:
@@ -193,7 +178,6 @@ private:
 
   uint8_t sendPin_;
   uint8_t receivePin_;
-  uint32_t leastTotal_ = BASELINE_START;
 };
 
 CapacitiveSensorESP32 sensor(SEND_PIN, RECEIVE_PIN);
@@ -208,20 +192,17 @@ void setup()
 
 void loop()
 {
-  // Send "r" from Serial Monitor if the untouched baseline needs resetting.
+  // Send "r" from the host to reset the smoothing filter.
   if (Serial.available() && Serial.read() == 'r')
   {
-    sensor.resetBaseline();
     filter.reset();
   }
 
-  const long rawValue = sensor.read(CYCLES_PER_READING);
+  const long rawValue = sensor.readRaw(CYCLES_PER_READING);
   if (rawValue < 0)
   {
-    // Keep both columns numeric so the plotter remains synchronized.
-    Serial.print(rawValue);
-    Serial.print(',');
-    Serial.println(rawValue);
+    // Comment line: hosts that parse "number,number" skip it.
+    Serial.println("#timeout: receive pin did not toggle within 50 ms, check wiring");
     return;
   }
 

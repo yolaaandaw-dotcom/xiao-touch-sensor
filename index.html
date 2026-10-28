@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>电容触摸监视器</title>
-<meta name="description" content="通过浏览器 Web Serial 直接读取 XIAO 电容触摸传感器串口数据并实时绘图,无需安装任何软件。">
+<title>电容档位标定器</title>
+<meta name="description" content="单路电容传感器四档位方向识别:浏览器 Web Serial 直连 XIAO,实时曲线、四档标定、可分性检查、触摸事件识别与记录。">
 <style>
   :root {
     color-scheme: light;
     --bg: #f4f4f2;
     --surface-1: #fcfcfb;
+    --surface-2: #f1f0ec;
     --border: #e2e1dc;
     --grid: #ebeae6;
     --text-primary: #0b0b0b;
@@ -17,6 +18,10 @@
     --text-muted: #8a8984;
     --series-1: #2a78d6;   /* 原始值 */
     --series-2: #eb6834;   /* 平滑值 */
+    --lv1: #1baf7a;
+    --lv2: #eda100;
+    --lv3: #6250d6;
+    --lv4: #e87ba4;
     --status-good: #008300;
     --status-good-bg: #e3f3e3;
     --status-bad: #e34948;
@@ -25,152 +30,121 @@
     --status-warn-bg: #fff3d6;
     --accent: #2a78d6;
     --accent-ink: #ffffff;
-    --threshold: #8a8984;
+    --baseline: #8a8984;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       color-scheme: dark;
-      --bg: #111110;
-      --surface-1: #1a1a19;
-      --border: #2c2c2a;
-      --grid: #262624;
-      --text-primary: #f0efec;
-      --text-secondary: #c3c2b7;
-      --text-muted: #8a8984;
-      --series-1: #3987e5;
-      --series-2: #d95926;
-      --status-good: #4cbf4c;
-      --status-good-bg: #1b2e1b;
-      --status-bad: #e66767;
-      --status-bad-bg: #332020;
-      --status-warn: #e0a640;
-      --status-warn-bg: #332a14;
-      --accent: #3987e5;
-      --threshold: #8a8984;
+      --bg: #111110; --surface-1: #1a1a19; --surface-2: #222220; --border: #2c2c2a; --grid: #262624;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8a8984;
+      --series-1: #3987e5; --series-2: #d95926;
+      --lv1: #199e70; --lv2: #c98500; --lv3: #9085e9; --lv4: #d55181;
+      --status-good: #4cbf4c; --status-good-bg: #1b2e1b; --status-bad: #e66767; --status-bad-bg: #332020;
+      --status-warn: #e0a640; --status-warn-bg: #332a14; --accent: #3987e5; --baseline: #8a8984;
     }
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --bg: #111110;
-    --surface-1: #1a1a19;
-    --border: #2c2c2a;
-    --grid: #262624;
-    --text-primary: #f0efec;
-    --text-secondary: #c3c2b7;
-    --text-muted: #8a8984;
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --status-good: #4cbf4c;
-    --status-good-bg: #1b2e1b;
-    --status-bad: #e66767;
-    --status-bad-bg: #332020;
-    --status-warn: #e0a640;
-    --status-warn-bg: #332a14;
-    --accent: #3987e5;
-    --threshold: #8a8984;
+    --bg: #111110; --surface-1: #1a1a19; --surface-2: #222220; --border: #2c2c2a; --grid: #262624;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8a8984;
+    --series-1: #3987e5; --series-2: #d95926;
+    --lv1: #199e70; --lv2: #c98500; --lv3: #9085e9; --lv4: #d55181;
+    --status-good: #4cbf4c; --status-good-bg: #1b2e1b; --status-bad: #e66767; --status-bad-bg: #332020;
+    --status-warn: #e0a640; --status-warn-bg: #332a14; --accent: #3987e5; --baseline: #8a8984;
   }
 
   * { box-sizing: border-box; }
   html, body { margin: 0; min-height: 100%; }
   body {
-    background: var(--bg);
-    color: var(--text-primary);
+    background: var(--bg); color: var(--text-primary);
     font-family: -apple-system, "PingFang SC", "Helvetica Neue", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
-    font-size: 14px;
-    line-height: 1.45;
-    padding: 16px;
+    font-size: 14px; line-height: 1.45; padding: 16px;
   }
   .wrap { max-width: 1100px; margin: 0 auto; display: grid; gap: 16px; }
-
   header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
   h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  h2 { font-size: 14px; margin: 0 0 10px; font-weight: 600; }
   .sub { color: var(--text-secondary); font-size: 13px; margin-top: 2px; }
   .hdr-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .pill {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 500;
-  }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; }
   .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
   .pill.ok { background: var(--status-good-bg); color: var(--status-good); }
   .pill.bad { background: var(--status-bad-bg); color: var(--status-bad); }
   .pill.warn { background: var(--status-warn-bg); color: var(--status-warn); }
-
-  .notice {
-    background: var(--status-warn-bg); color: var(--status-warn);
-    border-radius: 10px; padding: 12px 14px; font-size: 13px; display: none;
-  }
+  .notice { background: var(--status-warn-bg); color: var(--status-warn); border-radius: 10px; padding: 12px 14px; font-size: 13px; display: none; }
   .notice.show { display: block; }
   .notice b { font-weight: 600; }
 
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-  .tile {
-    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
-    padding: 12px 14px;
-  }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
   .tile .label { color: var(--text-secondary); font-size: 12px; display: flex; align-items: center; gap: 6px; }
   .tile .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
   .tile .value { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
   .tile .hint { color: var(--text-muted); font-size: 12px; }
-  .tile.touch .value { font-size: 22px; }
-  .tile.touch.on { border-color: var(--status-good); }
-  .tile.touch.on .value { color: var(--status-good); }
+  .tile.detect { grid-column: span 2; }
+  .tile.detect .value { font-size: 24px; }
+  .tile.detect.on { border-color: var(--lv-color, var(--status-good)); }
+  .tile.detect.on .value { color: var(--lv-color, var(--status-good)); }
+  .tile.detect.unsure { border-color: var(--status-warn); }
+  .tile.detect.unsure .value { color: var(--status-warn); }
 
-  .card {
-    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
-    padding: 14px;
-  }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
   .toolbar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 10px; }
-  .toolbar .group { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+  .group { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  .seg button {
-    background: transparent; border: 0; padding: 5px 10px; font: inherit; font-size: 13px;
-    color: var(--text-secondary); cursor: pointer;
-  }
+  .seg button { background: transparent; border: 0; padding: 5px 10px; font: inherit; font-size: 13px; color: var(--text-secondary); cursor: pointer; }
   .seg button.active { background: var(--accent); color: var(--accent-ink); }
-  button.btn {
-    font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
-    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
-  }
+  button.btn { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); white-space: nowrap; }
   button.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.btn.small { padding: 4px 9px; font-size: 12px; }
   button.btn:disabled { opacity: .5; cursor: default; }
-  input[type=range] { width: 140px; accent-color: var(--accent); }
-  .thr-val { min-width: 3ch; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+  input[type=range] { width: 120px; accent-color: var(--accent); }
+  input[type=number], select, input[type=text] { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-1); color: var(--text-primary); }
+  .num { font-variant-numeric: tabular-nums; }
 
   .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; flex-wrap: wrap; }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   .legend i { width: 14px; height: 2px; display: inline-block; border-radius: 1px; }
-  .legend i.dash { background: repeating-linear-gradient(90deg, var(--threshold) 0 4px, transparent 4px 7px); }
-
-  .chart-wrap { position: relative; height: 320px; }
+  .legend i.dash { background: repeating-linear-gradient(90deg, var(--baseline) 0 4px, transparent 4px 7px); }
+  .legend i.band { height: 8px; opacity: .35; }
+  .chart-wrap { position: relative; height: 340px; }
   canvas { width: 100%; height: 100%; display: block; }
-  .empty {
-    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    color: var(--text-muted); font-size: 13px; pointer-events: none; text-align: center; padding: 0 24px;
-  }
-  .tip {
-    position: absolute; pointer-events: none; display: none;
-    background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px;
-    padding: 6px 8px; font-size: 12px; color: var(--text-primary);
-    box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap;
-  }
+  .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 13px; pointer-events: none; text-align: center; padding: 0 24px; }
+  .tip { position: absolute; pointer-events: none; display: none; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; color: var(--text-primary); box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap; }
   .tip .row { display: flex; align-items: center; gap: 6px; }
   .tip .row i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
   .tip .t { color: var(--text-muted); margin-bottom: 2px; }
 
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { color: var(--text-secondary); font-weight: 500; font-size: 12px; }
+  .lvdot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 6px; vertical-align: -1px; }
+  .prog { height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-top: 4px; display: none; }
+  .prog i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .1s linear; }
+  .prog.show { display: block; }
+  .sep { font-size: 12px; margin-top: 10px; display: grid; gap: 4px; }
+  .sep .ok { color: var(--status-good); }
+  .sep .bad { color: var(--status-bad); }
+  .sep .warn { color: var(--status-warn); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .two { grid-template-columns: 1fr; } .tile.detect { grid-column: span 1; } }
+  textarea { width: 100%; min-height: 110px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text-primary); padding: 8px; resize: vertical; }
+  .log { max-height: 260px; overflow: auto; font-size: 13px; }
+  .log table th, .log table td { padding: 5px 8px; }
+  .counts { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+  .counts b { color: var(--text-primary); }
   .foot { color: var(--text-muted); font-size: 12px; }
-  .foot a { color: var(--accent); }
-  @media (max-width: 600px) {
-    .chart-wrap { height: 240px; }
-    .tile .value { font-size: 24px; }
-  }
+  .params { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 20px; }
+  .params label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+  .params label span.v { min-width: 4ch; text-align: right; color: var(--text-primary); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div>
-      <h1>电容触摸监视器</h1>
-      <div class="sub">XIAO ESP32 · D2 → 电阻 → 导电物体 → D3 · 115200 波特 · 浏览器直连串口</div>
+      <h1>电容档位标定器</h1>
+      <div class="sub">XIAO ESP32 · 单路电容 · 触摸后的稳定值落在哪一档,就是哪个方向 · 115200 波特</div>
     </div>
     <div class="hdr-right">
       <div id="status" class="pill bad"><span class="dot"></span><span id="statusText">未连接</span></div>
@@ -184,17 +158,17 @@
     <div class="tile">
       <div class="label"><span class="swatch" style="background:var(--series-1)"></span>原始值</div>
       <div class="value" id="vRaw">–</div>
-      <div class="hint">每 30 次充放电循环的计数</div>
+      <div class="hint">每 100 次充放电循环的计数</div>
     </div>
     <div class="tile">
-      <div class="label"><span class="swatch" style="background:var(--series-2)"></span>平滑值</div>
-      <div class="value" id="vSmooth">–</div>
-      <div class="hint">三点中值 + 指数平均</div>
+      <div class="label"><span class="swatch" style="background:var(--series-2)"></span>平滑值 / 相对基线</div>
+      <div class="value"><span id="vSmooth">–</span> <span style="font-size:16px;color:var(--text-muted)">/ <span id="vDev">–</span></span></div>
+      <div class="hint">基线 <span id="vBase" class="num">–</span></div>
     </div>
-    <div class="tile touch" id="tileTouch">
-      <div class="label">触摸状态</div>
-      <div class="value" id="vTouch">未触摸</div>
-      <div class="hint">平滑值 ≥ 阈值时判定</div>
+    <div class="tile detect" id="tileDetect">
+      <div class="label">当前识别</div>
+      <div class="value" id="vDetect">未触摸</div>
+      <div class="hint" id="vDetectHint">触摸后等信号稳住约 0.2 秒再判档</div>
     </div>
     <div class="tile">
       <div class="label">采样率</div>
@@ -212,19 +186,17 @@
           <button data-win="60">60 秒</button>
         </div>
       </div>
-      <div class="group">触摸阈值
-        <input type="range" id="thr" min="5" max="500" step="5" value="40">
-        <span class="thr-val" id="thrVal">40</span>
-      </div>
       <div class="group">
         <button class="btn" id="btnPause" disabled>暂停</button>
-        <button class="btn" id="btnReset" disabled title="向板子发送 r,重置基线和滤波器">重置基线</button>
+        <button class="btn" id="btnResetFilter" disabled title="向板子发送 r,重置板上的平滑滤波器">重置滤波</button>
+        <button class="btn" id="btnRebase" disabled title="不碰的时候点,取 1 秒中位数作为基线">重新取基线</button>
       </div>
     </div>
     <div class="legend">
       <span><i style="background:var(--series-1)"></i>原始值</span>
       <span><i style="background:var(--series-2)"></i>平滑值</span>
-      <span><i class="dash"></i>触摸阈值</span>
+      <span><i class="dash"></i>基线</span>
+      <span><i class="band" style="background:var(--lv1)"></i><i class="band" style="background:var(--lv2)"></i><i class="band" style="background:var(--lv3)"></i><i class="band" style="background:var(--lv4)"></i>四个档位的判定区间</span>
     </div>
     <div class="chart-wrap">
       <canvas id="chart"></canvas>
@@ -233,25 +205,94 @@
     </div>
   </section>
 
-  <div class="foot" id="foot">
-    需要 Chrome、Edge 或 Opera 桌面版。串口同一时间只能被一个程序占用,请先关闭 Arduino IDE 的串口监视器。
+  <div class="two">
+    <section class="card">
+      <h2>标定四个档位</h2>
+      <div class="sub" style="margin-bottom:8px">按住某一档的位置不松手,点那一行的"记录",页面采集 2 秒取中位数。每档都记完后看下方可分性检查。</div>
+      <table id="calTable">
+        <thead><tr><th>档位</th><th>方向</th><th>中心</th><th>波动</th><th>样本</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="prog" id="calProg"><i></i></div>
+      <div class="sep" id="sepReport">还没有标定数据。</div>
+      <div class="toolbar" style="margin-top:12px;margin-bottom:0">
+        <button class="btn" id="btnExport">导出 JSON</button>
+        <button class="btn" id="btnImport">导入 JSON</button>
+        <input type="file" id="fileImport" accept="application/json" style="display:none">
+        <button class="btn" id="btnClearCal">清除标定</button>
+      </div>
+      <textarea id="calJson" readonly style="margin-top:10px" title="标定数据,可直接复制"></textarea>
+    </section>
+
+    <section class="card">
+      <h2>识别参数</h2>
+      <div class="params">
+        <label>触摸阈值(相对基线)<input type="range" id="pOnset" min="5" max="300" step="5"><span class="v" id="pOnsetV"></span></label>
+        <label>稳定窗口 ms<input type="range" id="pSettleMs" min="80" max="600" step="20"><span class="v" id="pSettleMsV"></span></label>
+        <label>稳定容差(窗口内峰峰值)<input type="range" id="pSettleTol" min="2" max="100" step="1"><span class="v" id="pSettleTolV"></span></label>
+        <label>基线稳定容差<input type="range" id="pSteadyTol" min="2" max="60" step="1"><span class="v" id="pSteadyTolV"></span></label>
+        <label>两次触发最小间隔 ms<input type="range" id="pCooldown" min="0" max="2000" step="50"><span class="v" id="pCooldownV"></span></label>
+      </div>
+      <h2 style="margin-top:16px">触摸事件</h2>
+      <div class="counts" id="counts"></div>
+      <div class="log"><table id="logTable"><thead><tr><th>时间</th><th>平台值</th><th>判定</th><th>方向</th><th>用时</th></tr></thead><tbody></tbody></table></div>
+      <div class="toolbar" style="margin-top:10px;margin-bottom:0">
+        <button class="btn small" id="btnClearLog">清空记录</button>
+        <button class="btn small" id="btnExportLog">导出事件 CSV</button>
+      </div>
+    </section>
   </div>
+
+  <div class="foot" id="foot">需要 Chrome、Edge 或 Opera 桌面版。串口同一时间只能被一个程序占用,请先关闭 Arduino IDE 的串口监视器。</div>
 </div>
 
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  const canvas = $('chart'), ctx = canvas.getContext('2d');
-  const tip = $('tip');
-  let samples = [];          // {t, raw, smooth}
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const LV_VARS = ['--lv1', '--lv2', '--lv3', '--lv4'];
+  const DIRS = ['+x', '-x', '+y', '-y', '+z', '-z'];
+  const STORE_KEY = 'cap-level-cal-v1';
+
+  // ---------- calibration + params (persisted) ----------
+  const DEFAULT_PARAMS = { onset: 25, settleMs: 200, settleTol: 12, steadyTol: 10, cooldown: 300 };
+  let cal = {
+    version: 1,
+    firmware: { cyclesPerReading: 100, format: 'raw,smoothed' },
+    baseline: null,
+    levels: [
+      { name: '第1档', dir: '+x', center: null, spread: null, n: 0 },
+      { name: '第2档', dir: '-x', center: null, spread: null, n: 0 },
+      { name: '第3档', dir: '+y', center: null, spread: null, n: 0 },
+      { name: '第4档', dir: '-y', center: null, spread: null, n: 0 },
+    ],
+    params: { ...DEFAULT_PARAMS },
+    savedAt: null,
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+    if (saved && saved.levels && saved.levels.length === 4) cal = { ...cal, ...saved, params: { ...DEFAULT_PARAMS, ...(saved.params || {}) } };
+  } catch (e) {}
+
+  function persist() {
+    cal.savedAt = new Date().toISOString();
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(cal)); } catch (e) {}
+    $('calJson').value = JSON.stringify(cal, null, 2);
+  }
+
+  // ---------- live state ----------
+  let samples = [];            // {t, raw, smooth}
   let windowSec = 30;
-  let threshold = 40;
   let paused = false;
   let hoverX = null;
-  let errCount = 0;
   let lastRateCalc = 0, rateCount = 0;
-
-  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  let baseline = cal.baseline;  // absolute smoothed value at rest
+  let baseBuf = [];             // last ~1 s of {t, v} for baseline tracking
+  let touch = { state: 'idle', t0: 0, win: [], lastTrig: 0, lastPlateau: null, result: null, settledAt: 0 };
+  let lastT = 0;
+  let events = [];
+  let recording = null;         // {level, t0, vals[]}
+  let commentCount = 0;
 
   // ---------- Web Serial ----------
   const BAUD = 115200;
@@ -259,12 +300,7 @@
   let bytesIn = 0, linesIn = 0, connectedAt = 0, diagTimer = null;
   const encoder = new TextEncoder();
 
-  function notice(html) {
-    const el = $('notice');
-    el.innerHTML = html || '';
-    el.classList.toggle('show', !!html);
-  }
-
+  function notice(html) { const el = $('notice'); el.innerHTML = html || ''; el.classList.toggle('show', !!html); }
   if (!('serial' in navigator)) {
     notice('<b>这个浏览器不支持 Web Serial。</b> 请用 Chrome、Edge 或 Opera 的桌面版打开本页面。Safari 和 Firefox 不支持,手机浏览器也不支持。');
     $('btnConnect').disabled = true;
@@ -272,29 +308,20 @@
     notice('<b>当前页面不是安全上下文。</b> Web Serial 只能在 https://、localhost 或本地文件(file://)下使用。');
     $('btnConnect').disabled = true;
   }
-
   function portLabel(p) {
-    try {
-      const info = p.getInfo();
-      if (info.usbVendorId != null) {
-        return `USB ${info.usbVendorId.toString(16).padStart(4, '0')}:${(info.usbProductId || 0).toString(16).padStart(4, '0')}`;
-      }
-    } catch (e) {}
+    try { const i = p.getInfo(); if (i.usbVendorId != null) return `USB ${i.usbVendorId.toString(16).padStart(4,'0')}:${(i.usbProductId||0).toString(16).padStart(4,'0')}`; } catch (e) {}
     return '串口';
   }
-
   function setStatus(state, text) {
-    const el = $('status');
-    el.className = 'pill ' + state;
+    $('status').className = 'pill ' + state;
     $('statusText').textContent = text;
-    const connected = state === 'ok';
-    $('btnReset').disabled = !connected;
-    $('btnPause').disabled = !connected;
-    $('btnConnect').textContent = connected ? '断开' : '连接串口';
-    $('btnConnect').classList.toggle('primary', !connected);
-    $('empty').style.display = connected ? 'none' : '';
+    const c = state === 'ok';
+    ['btnResetFilter', 'btnPause', 'btnRebase'].forEach(id => $(id).disabled = !c);
+    document.querySelectorAll('#calTable button').forEach(b => b.disabled = !c);
+    $('btnConnect').textContent = c ? '断开' : '连接串口';
+    $('btnConnect').classList.toggle('primary', !c);
+    $('empty').style.display = c ? 'none' : '';
   }
-
   async function openPort(p) {
     port = p;
     await port.open({ baudRate: BAUD });
@@ -302,39 +329,27 @@
     keepReading = true;
     setStatus('ok', '已连接 ' + portLabel(port));
     notice('');
-    bytesIn = 0; linesIn = 0; connectedAt = Date.now();
-    clearInterval(diagTimer);
-    diagTimer = setInterval(updateDiag, 1000);
-    updateDiag();
+    bytesIn = 0; linesIn = 0; commentCount = 0; connectedAt = Date.now();
+    clearInterval(diagTimer); diagTimer = setInterval(updateDiag, 1000); updateDiag();
     readLoop();
   }
-
   async function connect() {
-    try {
-      const p = await navigator.serial.requestPort();
-      await openPort(p);
-    } catch (e) {
-      if (e && e.name === 'NotFoundError') return; // 用户取消了选择
-      notice('<b>连接失败:</b> ' + (e && e.message ? e.message : e) + '。如果提示端口被占用,请关闭 Arduino IDE 串口监视器或其他读串口的程序。');
+    try { const p = await navigator.serial.requestPort(); await openPort(p); }
+    catch (e) {
+      if (e && e.name === 'NotFoundError') return;
+      notice('<b>连接失败:</b> ' + (e && e.message ? e.message : e) + '。macOS 上这个错误几乎总是串口已被另一个程序打开:关闭 Arduino IDE 串口监视器、停掉 touch_monitor.py 或其他串口工具,再试。');
       await cleanup();
     }
   }
-
-  async function disconnect() {
-    keepReading = false;
-    try { if (reader) await reader.cancel(); } catch (e) {}
-    await cleanup();
-  }
-
+  async function disconnect() { keepReading = false; try { if (reader) await reader.cancel(); } catch (e) {} await cleanup(); }
   async function cleanup() {
-    try { if (writer) { writer.releaseLock(); } } catch (e) {}
+    try { if (writer) writer.releaseLock(); } catch (e) {}
     writer = null;
     try { if (port) await port.close(); } catch (e) {}
     port = null;
     clearInterval(diagTimer); diagTimer = null;
     setStatus('bad', '未连接');
   }
-
   async function readLoop() {
     const decoder = new TextDecoder();
     let buf = '';
@@ -354,194 +369,389 @@
           }
           if (buf.length > 4096) buf = '';
         }
-      } catch (e) {
-        // 设备被拔掉或读取出错,跳出并清理
-        keepReading = false;
-      } finally {
-        try { reader.releaseLock(); } catch (e) {}
-        reader = null;
-      }
+      } catch (e) { keepReading = false; }
+      finally { try { reader.releaseLock(); } catch (e) {} reader = null; }
     }
-    if (port) {
-      await cleanup();
-      setStatus('warn', '连接已断开');
-      $('foot').textContent = '串口断开了。重新插好板子后点"连接串口"。';
-    }
+    if (port) { await cleanup(); setStatus('warn', '连接已断开'); $('foot').textContent = '串口断开了。重新插好板子后点"连接串口"。'; }
   }
-
   function updateDiag() {
     if (!port) return;
     const secs = Math.round((Date.now() - connectedAt) / 1000);
     let msg = `已连接 ${secs} 秒 · 收到 ${bytesIn} 字节 · 解析 ${linesIn} 行`;
+    if (commentCount) msg += ` · 板子报错 ${commentCount} 次(接线)`;
     if (secs >= 3 && bytesIn === 0) {
-      msg += ' · 串口打开了但没有任何数据';
-      notice('<b>串口已打开,但 3 秒内没有收到数据。</b> 最常见的原因是另一个程序也在读这个串口,把数据抢走了:请关闭 Arduino IDE 的串口监视器、停掉 touch_monitor.py(终端里按 Ctrl-C)或其他串口工具,然后拔插一次板子,再点"连接串口"。也请确认选的是 XIAO 的串口,不是蓝牙或其他设备。');
-    } else if (secs >= 3 && bytesIn > 0 && linesIn === 0) {
-      msg += ' · 有数据但格式不对';
+      notice('<b>串口已打开,但 3 秒内没有收到数据。</b> 最常见的原因是另一个程序也在读这个串口。关闭 Arduino IDE 串口监视器、停掉 touch_monitor.py,拔插一次板子,再点"连接串口"。');
+    } else if (secs >= 3 && bytesIn > 0 && linesIn === 0 && commentCount === 0) {
       notice('<b>收到了数据,但不是"数字,数字"的格式。</b> 可能是波特率不对(固件用 115200),或者板子上烧的不是这个固件。');
-    } else if (bytesIn > 0 && linesIn > 0) {
-      notice('');
-    }
-    $('foot').textContent = msg + '。数值为 -2 表示 D3 没有收到 D2 的信号,请检查接线。';
+    } else if (linesIn > 0) notice('');
+    $('foot').textContent = msg;
   }
-
   function handleLine(line) {
+    if (line.startsWith('#')) { commentCount++; return; }
     const parts = line.split(',');
     if (parts.length !== 2) return;
     const raw = parseInt(parts[0], 10), smooth = parseInt(parts[1], 10);
-    if (Number.isNaN(raw) || Number.isNaN(smooth)) return;
+    if (Number.isNaN(raw) || Number.isNaN(smooth) || raw < 0) return;
     linesIn++;
     onSample({ t: Date.now() / 1000, raw, smooth });
   }
-
-  async function sendReset() {
-    if (!writer) return;
-    const b = $('btnReset'); b.disabled = true; b.textContent = '已发送…';
-    try { await writer.write(encoder.encode('r')); samples = []; } catch (e) {}
-    setTimeout(() => { b.disabled = !writer; b.textContent = '重置基线'; }, 600);
-  }
-
+  async function sendByte(ch) { if (!writer) return; try { await writer.write(encoder.encode(ch)); } catch (e) {} }
   $('btnConnect').addEventListener('click', () => port ? disconnect() : connect());
-  $('btnReset').addEventListener('click', sendReset);
+  $('btnResetFilter').addEventListener('click', () => sendByte('r'));
+  if ('serial' in navigator) navigator.serial.addEventListener('disconnect', e => { if (port && e.target === port) keepReading = false; });
 
-  if ('serial' in navigator) {
-    navigator.serial.addEventListener('disconnect', e => {
-      if (port && e.target === port) { keepReading = false; }
+  // ---------- math helpers ----------
+  const median = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+  const p2p = a => a.length ? Math.max(...a) - Math.min(...a) : 0;
+
+  // ---------- level classification ----------
+  function calibratedLevels() { return cal.levels.map((l, i) => ({ ...l, i })).filter(l => l.center != null).sort((a, b) => a.center - b.center); }
+  function bandsFor(levels) {
+    // judgement interval for each calibrated level: midpoints to neighbours;
+    // the outer edges mirror the inner half-gap (or use 1.5x spread if alone).
+    return levels.map((l, k) => {
+      const prev = levels[k - 1], next = levels[k + 1];
+      let lo, hi;
+      if (prev && next) { lo = (prev.center + l.center) / 2; hi = (l.center + next.center) / 2; }
+      else if (next) { hi = (l.center + next.center) / 2; lo = l.center - (hi - l.center); }
+      else if (prev) { lo = (prev.center + l.center) / 2; hi = l.center + (l.center - lo); }
+      else { const w = Math.max(l.spread || 0, 10) * 1.5; lo = l.center - w; hi = l.center + w; }
+      return { ...l, lo, hi };
     });
   }
+  function classify(dev) {
+    const bands = bandsFor(calibratedLevels());
+    if (bands.length < 2) return { i: null, reason: bands.length ? '只标了一档,无法区分' : '尚未标定' };
+    let best = null, bd = Infinity;
+    for (const b of bands) { const d = Math.abs(dev - b.center); if (d < bd) { bd = d; best = b; } }
+    if (dev < best.lo || dev > best.hi) return { i: null, reason: `离最近的${best.name}太远`, near: best };
+    return { i: best.i, band: best };
+  }
 
-  // ---------- data ----------
+  // ---------- per-sample processing ----------
   function onSample(m) {
     rateCount++;
     const now = performance.now();
-    if (now - lastRateCalc > 1000) {
-      $('vRate').textContent = Math.round(rateCount * 1000 / (now - lastRateCalc));
-      rateCount = 0; lastRateCalc = now;
-    }
-    if (m.raw < 0) {
-      errCount++;
-      $('vRaw').textContent = m.raw; $('vSmooth').textContent = m.smooth;
-      $('foot').textContent = `收到错误码 ${m.raw}(第 ${errCount} 次):D3 在 50 ms 内没有翻转电平,通常是接线断开或电阻过大。`;
-      setTouch(false);
-      return;
-    }
+    if (now - lastRateCalc > 1000) { $('vRate').textContent = Math.round(rateCount * 1000 / (now - lastRateCalc)); rateCount = 0; lastRateCalc = now; }
     if (paused) return;
     samples.push(m);
     const cutoff = m.t - 65;
     while (samples.length && samples[0].t < cutoff) samples.shift();
     $('vRaw').textContent = m.raw;
     $('vSmooth').textContent = m.smooth;
-    setTouch(m.smooth >= threshold);
+
+    const P = cal.params;
+    // --- baseline tracking: median of the last 1 s when flat and untouched
+    baseBuf.push({ t: m.t, v: m.smooth });
+    while (baseBuf.length && m.t - baseBuf[0].t > 1.0) baseBuf.shift();
+    const bvals = baseBuf.map(x => x.v);
+    const spanOk = baseBuf.length >= 2 && (baseBuf[baseBuf.length - 1].t - baseBuf[0].t) >= 0.8;
+    const flat = spanOk && p2p(bvals) <= P.steadyTol;
+    if (baseline == null) { if (spanOk) { baseline = median(bvals); cal.baseline = baseline; } else return; }
+    else if (touch.state === 'idle' && !recording && spanOk) {
+      if (flat) baseline = median(bvals);
+      else if (Math.max(...bvals) - baseline < P.onset) {
+        // Slow drift (not flat, but the whole last second stayed under the
+        // touch threshold): let the baseline follow with a ~1 s time constant
+        // so creep never crosses the threshold on its own. Right after a
+        // touch the window still holds the plateau, so this stays off until
+        // the window is clean.
+        const dt = lastT ? Math.min(0.2, m.t - lastT) : 0.02;
+        baseline += (median(bvals) - baseline) * Math.min(1, dt / 1.0);
+      }
+      cal.baseline = baseline;
+    }
+    lastT = m.t;
+    $('vBase').textContent = Math.round(baseline);
+    const dev = m.smooth - baseline;
+    $('vDev').textContent = (dev >= 0 ? '+' : '') + Math.round(dev);
+
+    // --- calibration recording
+    if (recording) {
+      recording.vals.push(dev);
+      const frac = Math.min(1, (m.t - recording.t0) / 2.0);
+      $('calProg').querySelector('i').style.width = (frac * 100) + '%';
+      if (m.t - recording.t0 >= 2.0) finishRecording();
+    }
+
+    // --- touch state machine
+    const T = touch;
+    if (T.state === 'idle') {
+      if (dev >= P.onset) { T.state = 'rising'; T.t0 = m.t; T.win = []; setDetect('识别中…', '等信号稳住', 'rising'); }
+    } else if (T.state === 'rising') {
+      if (dev < P.onset * 0.5) { T.state = 'idle'; setDetect('未触摸', '上次触摸太短,没判档', ''); return; }
+      T.win.push({ t: m.t, v: dev });
+      while (T.win.length && m.t - T.win[0].t > P.settleMs / 1000) T.win.shift();
+      const wv = T.win.map(x => x.v);
+      const span = T.win.length >= 2 ? (T.win[T.win.length - 1].t - T.win[0].t) : 0;
+      if (span >= P.settleMs / 1000 * 0.9 && p2p(wv) <= P.settleTol) {
+        const plateau = median(wv);
+        const res = classify(plateau);
+        const sinceTrig = (m.t - T.lastTrig) * 1000;
+        const blocked = sinceTrig < P.cooldown;
+        T.state = 'held'; T.lastPlateau = plateau; T.result = res; T.settledAt = m.t;
+        if (!blocked) T.lastTrig = m.t;
+        logEvent({ t: m.t, plateau, res, latencyMs: Math.round((m.t - T.t0) * 1000), blocked });
+        if (res.i != null) setDetect(`${cal.levels[res.i].name} → ${cal.levels[res.i].dir}`, `平台 +${Math.round(plateau)} · 判定区间 ${Math.round(res.band.lo)} 到 ${Math.round(res.band.hi)}${blocked ? ' · 间隔太短,已忽略' : ''}`, 'on', res.i);
+        else setDetect('不确定', `平台 +${Math.round(plateau)} · ${res.reason}`, 'unsure');
+      } else if (m.t - T.t0 > 2.0) {
+        setDetect('信号不稳', `已 ${(m.t - T.t0).toFixed(1)} 秒未稳定,峰峰值 ${Math.round(p2p(wv))} 超过容差 ${P.settleTol}`, 'unsure');
+      }
+    } else if (T.state === 'held') {
+      if (dev < P.onset * 0.5) { T.state = 'idle'; setDetect('未触摸', T.lastPlateau != null ? `上次平台 +${Math.round(T.lastPlateau)}` : '', ''); }
+      else {
+        // Drift guard: a "touch" that stays perfectly flat for a long time is
+        // not a finger, it is the rest level having moved. Adopt it as the new
+        // baseline: quickly when the plateau matched no level, slowly when it
+        // did (someone may really be resting on a pad).
+        const limit = (T.result && T.result.i != null) ? 8.0 : 2.0;
+        if (flat && m.t - T.settledAt > limit) {
+          baseline = median(bvals); cal.baseline = baseline;
+          T.state = 'idle';
+          setDetect('未触摸', `信号平稳了 ${limit} 秒以上,已把它当作新的基线 ${Math.round(baseline)}`, '');
+        }
+      }
+    }
   }
-  function setTouch(on) {
-    $('tileTouch').classList.toggle('on', on);
-    $('vTouch').textContent = on ? '触摸中' : '未触摸';
+  function setDetect(text, hint, cls, li) {
+    const el = $('tileDetect');
+    el.className = 'tile detect' + (cls === 'on' ? ' on' : cls === 'unsure' ? ' unsure' : '');
+    el.style.setProperty('--lv-color', li != null ? css(LV_VARS[li]) : '');
+    $('vDetect').textContent = text; $('vDetectHint').textContent = hint;
   }
+
+  // ---------- calibration UI ----------
+  function renderCal() {
+    const tb = $('calTable').querySelector('tbody');
+    tb.innerHTML = '';
+    cal.levels.forEach((l, i) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><span class="lvdot" style="background:${css(LV_VARS[i])}"></span><input type="text" value="${l.name}" data-i="${i}" class="nm" style="width:70px"></td>
+        <td><select data-i="${i}" class="dir">${DIRS.map(d => `<option ${d === l.dir ? 'selected' : ''}>${d}</option>`).join('')}</select></td>
+        <td class="num">${l.center != null ? '+' + Math.round(l.center) : '–'}</td>
+        <td class="num">${l.spread != null ? '±' + Math.round(l.spread / 2) : '–'}</td>
+        <td class="num">${l.n || '–'}</td>
+        <td><button class="btn small rec" data-i="${i}" ${port ? '' : 'disabled'}>${l.center != null ? '重录' : '记录'}</button></td>`;
+      tb.appendChild(tr);
+    });
+    tb.querySelectorAll('input.nm').forEach(el => el.addEventListener('change', e => { cal.levels[+e.target.dataset.i].name = e.target.value || `第${+e.target.dataset.i + 1}档`; persist(); }));
+    tb.querySelectorAll('select.dir').forEach(el => el.addEventListener('change', e => { cal.levels[+e.target.dataset.i].dir = e.target.value; persist(); }));
+    tb.querySelectorAll('button.rec').forEach(el => el.addEventListener('click', e => startRecording(+e.target.dataset.i)));
+    renderSeparation();
+    $('calJson').value = JSON.stringify(cal, null, 2);
+  }
+  function renderSeparation() {
+    const lv = calibratedLevels();
+    const el = $('sepReport');
+    if (lv.length < 2) { el.innerHTML = lv.length ? '再记录至少一档才能检查可分性。' : '还没有标定数据。'; return; }
+    const rows = [];
+    for (let k = 1; k < lv.length; k++) {
+      const a = lv[k - 1], b = lv[k];
+      const gap = b.center - a.center;
+      const noise = ((a.spread || 0) + (b.spread || 0)) / 2;       // sum of half-spreads
+      const ratio = noise > 0 ? gap / noise : Infinity;
+      const cls = ratio >= 3 ? 'ok' : ratio >= 1.5 ? 'warn' : 'bad';
+      const word = ratio >= 3 ? '分得开' : ratio >= 1.5 ? '勉强,容易误判' : '重叠,无法区分';
+      rows.push(`<div class="${cls}">${a.name} (+${Math.round(a.center)}) 与 ${b.name} (+${Math.round(b.center)}):间距 ${Math.round(gap)},两档波动合计 ±${Math.round(noise)} → ${word}</div>`);
+    }
+    const order = cal.levels.map((l, i) => l.center == null ? null : i).filter(i => i != null);
+    const sortedIdx = lv.map(l => l.i);
+    const inOrder = order.every((v, k) => v === sortedIdx[k]);
+    rows.push(`<div class="${inOrder ? 'ok' : 'warn'}">${inOrder ? '档位中心按 1→4 递增,和编号一致。' : '注意:档位中心的高低顺序和编号顺序不一致(这不影响识别,但容易弄混)。'}</div>`);
+    el.innerHTML = rows.join('');
+  }
+  function startRecording(i) {
+    if (!port || recording) return;
+    recording = { level: i, t0: Date.now() / 1000, vals: [] };
+    $('calProg').classList.add('show'); $('calProg').querySelector('i').style.width = '0%';
+    setDetect(`正在记录 ${cal.levels[i].name}…`, '按住不要松手,2 秒', 'rising');
+  }
+  function finishRecording() {
+    const r = recording; recording = null;
+    $('calProg').classList.remove('show');
+    const P = cal.params;
+    const touched = r.vals.filter(v => v >= P.onset);
+    if (touched.length < r.vals.length * 0.6 || touched.length < 10) {
+      setDetect('记录失败', `2 秒内只有 ${touched.length}/${r.vals.length} 个样本超过触摸阈值 ${P.onset},请按住后再点记录`, 'unsure');
+      return;
+    }
+    // drop the first 25% (rise) and use the rest as the plateau
+    const plateau = touched.slice(Math.floor(touched.length * 0.25));
+    const L = cal.levels[r.level];
+    L.center = median(plateau); L.spread = p2p(plateau); L.n = plateau.length;
+    persist(); renderCal();
+    setDetect(`${L.name} 已记录`, `中心 +${Math.round(L.center)},波动 ±${Math.round(L.spread / 2)}`, 'on', r.level);
+  }
+  $('btnRebase').addEventListener('click', () => {
+    const vals = baseBuf.map(x => x.v);
+    if (vals.length < 5) return;
+    baseline = median(vals); cal.baseline = baseline; persist();
+    setDetect('基线已更新', `基线 ${Math.round(baseline)},峰峰值 ${Math.round(p2p(vals))}`, '');
+  });
+  $('btnClearCal').addEventListener('click', () => {
+    if (!confirm('清除四个档位的标定数据?')) return;
+    cal.levels.forEach(l => { l.center = null; l.spread = null; l.n = 0; });
+    persist(); renderCal();
+  });
+  $('btnExport').addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(cal, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `cap-level-cal-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  $('btnImport').addEventListener('click', () => $('fileImport').click());
+  $('fileImport').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const d = JSON.parse(await f.text());
+      if (!d.levels || d.levels.length !== 4) throw new Error('不是本页面导出的标定文件');
+      cal = { ...cal, ...d, params: { ...DEFAULT_PARAMS, ...(d.params || {}) } };
+      if (cal.baseline != null) baseline = cal.baseline;
+      persist(); renderCal(); renderParams();
+      setDetect('已导入标定', f.name, '');
+    } catch (err) { alert('导入失败:' + err.message); }
+    e.target.value = '';
+  });
+
+  // ---------- params UI ----------
+  const PARAM_IDS = { onset: 'pOnset', settleMs: 'pSettleMs', settleTol: 'pSettleTol', steadyTol: 'pSteadyTol', cooldown: 'pCooldown' };
+  function renderParams() {
+    for (const [k, id] of Object.entries(PARAM_IDS)) { $(id).value = cal.params[k]; $(id + 'V').textContent = cal.params[k]; }
+  }
+  for (const [k, id] of Object.entries(PARAM_IDS)) {
+    $(id).addEventListener('input', e => { cal.params[k] = +e.target.value; $(id + 'V').textContent = cal.params[k]; persist(); });
+  }
+
+  // ---------- event log ----------
+  function logEvent(ev) {
+    events.push(ev);
+    if (events.length > 500) events.shift();
+    renderLog();
+  }
+  function renderLog() {
+    const tb = $('logTable').querySelector('tbody');
+    tb.innerHTML = '';
+    const counts = [0, 0, 0, 0]; let unsure = 0;
+    events.forEach(ev => { if (ev.res.i != null) counts[ev.res.i]++; else unsure++; });
+    $('counts').innerHTML = cal.levels.map((l, i) => `<span><span class="lvdot" style="background:${css(LV_VARS[i])}"></span>${l.name} <b>${counts[i]}</b></span>`).join('') + `<span>不确定 <b>${unsure}</b></span><span>共 <b>${events.length}</b></span>`;
+    [...events].reverse().slice(0, 50).forEach(ev => {
+      const tr = document.createElement('tr');
+      const d = new Date(ev.t * 1000);
+      const time = d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0').slice(0, 1);
+      const judged = ev.res.i != null ? `<span class="lvdot" style="background:${css(LV_VARS[ev.res.i])}"></span>${cal.levels[ev.res.i].name}` : `<span style="color:var(--status-warn)">不确定</span>`;
+      const dir = ev.res.i != null ? cal.levels[ev.res.i].dir : (ev.res.reason || '');
+      tr.innerHTML = `<td class="num">${time}</td><td class="num">+${Math.round(ev.plateau)}</td><td>${judged}${ev.blocked ? ' <span style="color:var(--text-muted)">(忽略)</span>' : ''}</td><td>${dir}</td><td class="num">${ev.latencyMs} ms</td>`;
+      tb.appendChild(tr);
+    });
+  }
+  $('btnClearLog').addEventListener('click', () => { events = []; renderLog(); });
+  $('btnExportLog').addEventListener('click', () => {
+    const lines = ['time_iso,plateau,level_index,level_name,dir,latency_ms,ignored'];
+    events.forEach(ev => lines.push([new Date(ev.t * 1000).toISOString(), Math.round(ev.plateau), ev.res.i != null ? ev.res.i + 1 : '', ev.res.i != null ? cal.levels[ev.res.i].name : '不确定', ev.res.i != null ? cal.levels[ev.res.i].dir : '', ev.latencyMs, ev.blocked ? 1 : 0].join(',')));
+    const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'touch-events.csv'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
 
   // ---------- controls ----------
-  $('winSeg').addEventListener('click', e => {
-    const b = e.target.closest('button'); if (!b) return;
-    windowSec = +b.dataset.win;
-    [...$('winSeg').children].forEach(x => x.classList.toggle('active', x === b));
-  });
-  $('thr').addEventListener('input', e => { threshold = +e.target.value; $('thrVal').textContent = threshold; });
-  $('btnPause').addEventListener('click', () => {
-    paused = !paused;
-    $('btnPause').textContent = paused ? '继续' : '暂停';
-  });
+  $('winSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; windowSec = +b.dataset.win; [...$('winSeg').children].forEach(x => x.classList.toggle('active', x === b)); });
+  $('btnPause').addEventListener('click', () => { paused = !paused; $('btnPause').textContent = paused ? '继续' : '暂停'; });
 
   // ---------- chart ----------
-  function resize() {
-    const r = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(r.width * dpr);
-    canvas.height = Math.round(r.height * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const canvas = $('chart'), ctx = canvas.getContext('2d'), tip = $('tip');
+  function resize() { const r = canvas.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1; canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+  window.addEventListener('resize', resize); resize();
+  const PAD = { l: 48, r: 56, t: 10, b: 24 };
+  const usedLabelY = [];
+  function sideLabel(text, yy, color) {
+    // keep right-margin labels at least 12 px apart
+    let y2 = yy;
+    for (let guard = 0; guard < 8; guard++) {
+      const clash = usedLabelY.find(u => Math.abs(u - y2) < 12);
+      if (clash == null) break;
+      y2 = clash + 12;
+    }
+    usedLabelY.push(y2);
+    ctx.fillStyle = color; ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, PAD.l + pw_ + 6, y2);
   }
-  window.addEventListener('resize', resize);
-  resize();
-
-  const PAD = { l: 44, r: 12, t: 10, b: 24 };
+  let pw_ = 0;
+  function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
   function draw() {
     const W = canvas.getBoundingClientRect().width, H = canvas.getBoundingClientRect().height;
     ctx.clearRect(0, 0, W, H);
     const now = samples.length ? samples[samples.length - 1].t : Date.now() / 1000;
     const t0 = now - windowSec;
     const vis = samples.filter(s => s.t >= t0);
-    let maxV = threshold;
-    for (const s of vis) { if (s.raw > maxV) maxV = s.raw; if (s.smooth > maxV) maxV = s.smooth; }
-    maxV = niceCeil(maxV * 1.15);
-    const minV = 0;
+    const bands = bandsFor(calibratedLevels());
+    const base = baseline != null ? baseline : 0;
+    let maxV = base + cal.params.onset * 2, minV = Math.max(0, base - 20);
+    for (const s of vis) { if (s.raw > maxV) maxV = s.raw; if (s.smooth > maxV) maxV = s.smooth; if (s.raw < minV) minV = s.raw; }
+    for (const b of bands) { if (base + b.hi > maxV) maxV = base + b.hi; }
+    maxV = minV + niceCeil((maxV - minV) * 1.1);
     const pw = W - PAD.l - PAD.r, ph = H - PAD.t - PAD.b;
+    pw_ = pw; usedLabelY.length = 0;
     const x = t => PAD.l + (t - t0) / windowSec * pw;
     const y = v => PAD.t + ph - (v - minV) / (maxV - minV) * ph;
 
-    ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
-    ctx.fillStyle = css('--text-muted'); ctx.font = '11px -apple-system, sans-serif';
-    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    const steps = 4;
-    for (let i = 0; i <= steps; i++) {
-      const v = minV + (maxV - minV) * i / steps;
-      const yy = y(v);
-      ctx.beginPath(); ctx.moveTo(PAD.l, yy); ctx.lineTo(W - PAD.r, yy); ctx.stroke();
-      ctx.fillText(Math.round(v), PAD.l - 6, yy);
+    // bands
+    for (const b of bands) {
+      const c = css(LV_VARS[b.i]);
+      const yTop = Math.max(PAD.t, y(base + b.hi)), yBot = Math.min(PAD.t + ph, y(base + b.lo));
+      ctx.fillStyle = hexA(c, 0.13); ctx.fillRect(PAD.l, yTop, pw, yBot - yTop);
+      ctx.strokeStyle = hexA(c, 0.8); ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+      ctx.beginPath(); ctx.moveTo(PAD.l, y(base + b.center)); ctx.lineTo(PAD.l + pw, y(base + b.center)); ctx.stroke(); ctx.setLineDash([]);
+      sideLabel(`${b.name} ${b.dir}`, y(base + b.center), c);
     }
+    // grid + y labels
+    ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1; ctx.fillStyle = css('--text-muted'); ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (let i = 0; i <= 4; i++) { const v = minV + (maxV - minV) * i / 4; const yy = y(v); ctx.beginPath(); ctx.moveTo(PAD.l, yy); ctx.lineTo(W - PAD.r, yy); ctx.stroke(); ctx.fillText(Math.round(v), PAD.l - 6, yy); }
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     const xt = windowSec <= 10 ? 2 : windowSec <= 30 ? 5 : 10;
-    for (let s = 0; s <= windowSec; s += xt) {
-      const xx = x(now - s);
-      ctx.fillText(s === 0 ? '现在' : `-${s}s`, xx, PAD.t + ph + 6);
+    for (let s = 0; s <= windowSec; s += xt) ctx.fillText(s === 0 ? '现在' : `-${s}s`, x(now - s), PAD.t + ph + 6);
+    // baseline + onset
+    if (baseline != null) {
+      ctx.setLineDash([4, 3]); ctx.strokeStyle = css('--baseline'); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(PAD.l, y(baseline)); ctx.lineTo(W - PAD.r, y(baseline)); ctx.stroke();
+      ctx.setLineDash([1, 3]); ctx.beginPath(); ctx.moveTo(PAD.l, y(baseline + cal.params.onset)); ctx.lineTo(W - PAD.r, y(baseline + cal.params.onset)); ctx.stroke();
+      ctx.setLineDash([]);
+      sideLabel('基线', y(baseline), css('--text-muted')); sideLabel('触摸阈值', y(baseline + cal.params.onset), css('--text-muted'));
     }
-    ctx.setLineDash([4, 3]); ctx.strokeStyle = css('--threshold'); ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(PAD.l, y(threshold)); ctx.lineTo(W - PAD.r, y(threshold)); ctx.stroke();
-    ctx.setLineDash([]);
-
-    const line = (key, color, width) => {
-      if (vis.length < 2) return;
-      ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      ctx.beginPath();
-      vis.forEach((s, i) => { const px = x(s.t), py = y(s[key]); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
-      ctx.stroke();
-    };
-    line('raw', css('--series-1'), 1.25);
+    // series
+    const line = (key, color, width) => { if (vis.length < 2) return; ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.beginPath(); vis.forEach((s, i) => { const px = x(s.t), py = y(s[key]); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }); ctx.stroke(); };
+    line('raw', css('--series-1'), 1);
     line('smooth', css('--series-2'), 2);
-
+    // event markers
+    for (const ev of events) {
+      if (ev.t < t0) continue;
+      const ex = x(ev.t); const c = ev.res.i != null ? css(LV_VARS[ev.res.i]) : css('--status-warn');
+      ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(ex, PAD.t); ctx.lineTo(ex - 4, PAD.t + 8); ctx.lineTo(ex + 4, PAD.t + 8); ctx.closePath(); ctx.fill();
+    }
+    // hover
     if (hoverX != null && vis.length) {
       const ht = t0 + (hoverX - PAD.l) / pw * windowSec;
       let best = vis[0], bd = Infinity;
       for (const s of vis) { const d = Math.abs(s.t - ht); if (d < bd) { bd = d; best = s; } }
       const hx = x(best.t);
-      ctx.strokeStyle = css('--text-muted'); ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(hx, PAD.t); ctx.lineTo(hx, PAD.t + ph); ctx.stroke();
-      for (const [k, c] of [['raw', '--series-1'], ['smooth', '--series-2']]) {
-        ctx.beginPath(); ctx.arc(hx, y(best[k]), 4, 0, Math.PI * 2);
-        ctx.fillStyle = css(c); ctx.fill();
-        ctx.strokeStyle = css('--surface-1'); ctx.lineWidth = 2; ctx.stroke();
-      }
+      ctx.strokeStyle = css('--text-muted'); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(hx, PAD.t); ctx.lineTo(hx, PAD.t + ph); ctx.stroke();
+      for (const [k, c] of [['raw', '--series-1'], ['smooth', '--series-2']]) { ctx.beginPath(); ctx.arc(hx, y(best[k]), 4, 0, Math.PI * 2); ctx.fillStyle = css(c); ctx.fill(); ctx.strokeStyle = css('--surface-1'); ctx.lineWidth = 2; ctx.stroke(); }
       tip.style.display = 'block';
-      tip.innerHTML = `<div class="t">${(now - best.t).toFixed(2)} 秒前</div>
-        <div class="row"><i style="background:${css('--series-1')}"></i>原始值 <b>${best.raw}</b></div>
-        <div class="row"><i style="background:${css('--series-2')}"></i>平滑值 <b>${best.smooth}</b></div>`;
-      const tw = tip.offsetWidth;
-      tip.style.left = (hx + 12 + tw > W ? hx - 12 - tw : hx + 12) + 'px';
-      tip.style.top = '8px';
-    } else {
-      tip.style.display = 'none';
-    }
+      const dv = baseline != null ? best.smooth - baseline : null;
+      tip.innerHTML = `<div class="t">${(now - best.t).toFixed(2)} 秒前</div><div class="row"><i style="background:${css('--series-1')}"></i>原始值 <b>${best.raw}</b></div><div class="row"><i style="background:${css('--series-2')}"></i>平滑值 <b>${best.smooth}</b>${dv != null ? ` <span style="color:var(--text-muted)">(相对基线 ${dv >= 0 ? '+' : ''}${Math.round(dv)})</span>` : ''}</div>`;
+      const tw = tip.offsetWidth; tip.style.left = (hx + 12 + tw > W ? hx - 12 - tw : hx + 12) + 'px'; tip.style.top = '8px';
+    } else tip.style.display = 'none';
     requestAnimationFrame(draw);
   }
-  function niceCeil(v) {
-    if (v <= 10) return 10;
-    const p = Math.pow(10, Math.floor(Math.log10(v)));
-    const m = v / p;
-    const n = m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10;
-    return n * p;
-  }
+  function niceCeil(v) { if (v <= 10) return 10; const p = Math.pow(10, Math.floor(Math.log10(v))); const m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; }
   canvas.addEventListener('mousemove', e => { hoverX = e.clientX - canvas.getBoundingClientRect().left; });
   canvas.addEventListener('mouseleave', () => { hoverX = null; });
-  canvas.addEventListener('touchmove', e => { hoverX = e.touches[0].clientX - canvas.getBoundingClientRect().left; }, { passive: true });
-  canvas.addEventListener('touchend', () => { hoverX = null; });
 
+  // ---------- test hook (no hardware): window.__feed(raw, smooth) ----------
+  window.__feed = (raw, smooth, t) => onSample({ t: t != null ? t : Date.now() / 1000, raw, smooth: smooth == null ? raw : smooth });
+  window.__setLevels = centers => { centers.forEach((c, i) => { cal.levels[i].center = c; cal.levels[i].spread = 10; cal.levels[i].n = 70; }); persist(); renderCal(); };
+  window.__state = () => ({ baseline, touch: touch.state, events: events.map(e => ({ plateau: Math.round(e.plateau), level: e.res.i, reason: e.res.reason || null, latencyMs: e.latencyMs, blocked: e.blocked })), cal });
+
+  renderCal(); renderParams(); renderLog(); persist();
   requestAnimationFrame(draw);
 })();
 </script>
