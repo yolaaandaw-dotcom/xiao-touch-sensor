@@ -256,6 +256,7 @@
   // ---------- Web Serial ----------
   const BAUD = 115200;
   let port = null, reader = null, writer = null, keepReading = false;
+  let bytesIn = 0, linesIn = 0, connectedAt = 0, diagTimer = null;
   const encoder = new TextEncoder();
 
   function notice(html) {
@@ -301,7 +302,10 @@
     keepReading = true;
     setStatus('ok', '已连接 ' + portLabel(port));
     notice('');
-    $('foot').textContent = '已连接。数值为 -2 表示 D3 没有收到 D2 的信号,请检查接线。';
+    bytesIn = 0; linesIn = 0; connectedAt = Date.now();
+    clearInterval(diagTimer);
+    diagTimer = setInterval(updateDiag, 1000);
+    updateDiag();
     readLoop();
   }
 
@@ -327,6 +331,7 @@
     writer = null;
     try { if (port) await port.close(); } catch (e) {}
     port = null;
+    clearInterval(diagTimer); diagTimer = null;
     setStatus('bad', '未连接');
   }
 
@@ -339,6 +344,7 @@
         for (;;) {
           const { value, done } = await reader.read();
           if (done) break;
+          bytesIn += value.length;
           buf += decoder.decode(value, { stream: true });
           let idx;
           while ((idx = buf.indexOf('\n')) >= 0) {
@@ -363,11 +369,28 @@
     }
   }
 
+  function updateDiag() {
+    if (!port) return;
+    const secs = Math.round((Date.now() - connectedAt) / 1000);
+    let msg = `已连接 ${secs} 秒 · 收到 ${bytesIn} 字节 · 解析 ${linesIn} 行`;
+    if (secs >= 3 && bytesIn === 0) {
+      msg += ' · 串口打开了但没有任何数据';
+      notice('<b>串口已打开,但 3 秒内没有收到数据。</b> 最常见的原因是另一个程序也在读这个串口,把数据抢走了:请关闭 Arduino IDE 的串口监视器、停掉 touch_monitor.py(终端里按 Ctrl-C)或其他串口工具,然后拔插一次板子,再点"连接串口"。也请确认选的是 XIAO 的串口,不是蓝牙或其他设备。');
+    } else if (secs >= 3 && bytesIn > 0 && linesIn === 0) {
+      msg += ' · 有数据但格式不对';
+      notice('<b>收到了数据,但不是"数字,数字"的格式。</b> 可能是波特率不对(固件用 115200),或者板子上烧的不是这个固件。');
+    } else if (bytesIn > 0 && linesIn > 0) {
+      notice('');
+    }
+    $('foot').textContent = msg + '。数值为 -2 表示 D3 没有收到 D2 的信号,请检查接线。';
+  }
+
   function handleLine(line) {
     const parts = line.split(',');
     if (parts.length !== 2) return;
     const raw = parseInt(parts[0], 10), smooth = parseInt(parts[1], 10);
     if (Number.isNaN(raw) || Number.isNaN(smooth)) return;
+    linesIn++;
     onSample({ t: Date.now() / 1000, raw, smooth });
   }
 
@@ -385,13 +408,6 @@
     navigator.serial.addEventListener('disconnect', e => {
       if (port && e.target === port) { keepReading = false; }
     });
-    // 之前授权过的串口在页面打开时自动重连
-    navigator.serial.getPorts().then(async ports => {
-      if (ports.length === 1 && !port) {
-        try { await openPort(ports[0]); }
-        catch (e) { /* 板子可能没插,静默忽略 */ await cleanup(); }
-      }
-    }).catch(() => {});
   }
 
   // ---------- data ----------
