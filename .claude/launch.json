@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "touch-monitor",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["touch_monitor.py", "--http-port", "8765"],
+      "port": 8765
+    }
+  ]
+}

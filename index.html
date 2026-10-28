@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>电容触摸监视器</title>
+<meta name="description" content="通过浏览器 Web Serial 直接读取 XIAO 电容触摸传感器串口数据并实时绘图,无需安装任何软件。">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f4f2;
+    --surface-1: #fcfcfb;
+    --border: #e2e1dc;
+    --grid: #ebeae6;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #8a8984;
+    --series-1: #2a78d6;   /* 原始值 */
+    --series-2: #eb6834;   /* 平滑值 */
+    --status-good: #008300;
+    --status-good-bg: #e3f3e3;
+    --status-bad: #e34948;
+    --status-bad-bg: #fbe6e6;
+    --status-warn: #a86a00;
+    --status-warn-bg: #fff3d6;
+    --accent: #2a78d6;
+    --accent-ink: #ffffff;
+    --threshold: #8a8984;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #111110;
+      --surface-1: #1a1a19;
+      --border: #2c2c2a;
+      --grid: #262624;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8a8984;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --status-good: #4cbf4c;
+      --status-good-bg: #1b2e1b;
+      --status-bad: #e66767;
+      --status-bad-bg: #332020;
+      --status-warn: #e0a640;
+      --status-warn-bg: #332a14;
+      --accent: #3987e5;
+      --threshold: #8a8984;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #111110;
+    --surface-1: #1a1a19;
+    --border: #2c2c2a;
+    --grid: #262624;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8a8984;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --status-good: #4cbf4c;
+    --status-good-bg: #1b2e1b;
+    --status-bad: #e66767;
+    --status-bad-bg: #332020;
+    --status-warn: #e0a640;
+    --status-warn-bg: #332a14;
+    --accent: #3987e5;
+    --threshold: #8a8984;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: -apple-system, "PingFang SC", "Helvetica Neue", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    padding: 16px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; display: grid; gap: 16px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .sub { color: var(--text-secondary); font-size: 13px; margin-top: 2px; }
+  .hdr-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 500;
+  }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .pill.ok { background: var(--status-good-bg); color: var(--status-good); }
+  .pill.bad { background: var(--status-bad-bg); color: var(--status-bad); }
+  .pill.warn { background: var(--status-warn-bg); color: var(--status-warn); }
+
+  .notice {
+    background: var(--status-warn-bg); color: var(--status-warn);
+    border-radius: 10px; padding: 12px 14px; font-size: 13px; display: none;
+  }
+  .notice.show { display: block; }
+  .notice b { font-weight: 600; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .tile .label { color: var(--text-secondary); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .tile .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .tile .value { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .hint { color: var(--text-muted); font-size: 12px; }
+  .tile.touch .value { font-size: 22px; }
+  .tile.touch.on { border-color: var(--status-good); }
+  .tile.touch.on .value { color: var(--status-good); }
+
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px;
+  }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 10px; }
+  .toolbar .group { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button {
+    background: transparent; border: 0; padding: 5px 10px; font: inherit; font-size: 13px;
+    color: var(--text-secondary); cursor: pointer;
+  }
+  .seg button.active { background: var(--accent); color: var(--accent-ink); }
+  button.btn {
+    font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+  button.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  input[type=range] { width: 140px; accent-color: var(--accent); }
+  .thr-val { min-width: 3ch; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 14px; height: 2px; display: inline-block; border-radius: 1px; }
+  .legend i.dash { background: repeating-linear-gradient(90deg, var(--threshold) 0 4px, transparent 4px 7px); }
+
+  .chart-wrap { position: relative; height: 320px; }
+  canvas { width: 100%; height: 100%; display: block; }
+  .empty {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); font-size: 13px; pointer-events: none; text-align: center; padding: 0 24px;
+  }
+  .tip {
+    position: absolute; pointer-events: none; display: none;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; font-size: 12px; color: var(--text-primary);
+    box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap;
+  }
+  .tip .row { display: flex; align-items: center; gap: 6px; }
+  .tip .row i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  .tip .t { color: var(--text-muted); margin-bottom: 2px; }
+
+  .foot { color: var(--text-muted); font-size: 12px; }
+  .foot a { color: var(--accent); }
+  @media (max-width: 600px) {
+    .chart-wrap { height: 240px; }
+    .tile .value { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>电容触摸监视器</h1>
+      <div class="sub">XIAO ESP32 · D2 → 电阻 → 导电物体 → D3 · 115200 波特 · 浏览器直连串口</div>
+    </div>
+    <div class="hdr-right">
+      <div id="status" class="pill bad"><span class="dot"></span><span id="statusText">未连接</span></div>
+      <button class="btn primary" id="btnConnect">连接串口</button>
+    </div>
+  </header>
+
+  <div class="notice" id="notice"></div>
+
+  <section class="tiles">
+    <div class="tile">
+      <div class="label"><span class="swatch" style="background:var(--series-1)"></span>原始值</div>
+      <div class="value" id="vRaw">–</div>
+      <div class="hint">每 30 次充放电循环的计数</div>
+    </div>
+    <div class="tile">
+      <div class="label"><span class="swatch" style="background:var(--series-2)"></span>平滑值</div>
+      <div class="value" id="vSmooth">–</div>
+      <div class="hint">三点中值 + 指数平均</div>
+    </div>
+    <div class="tile touch" id="tileTouch">
+      <div class="label">触摸状态</div>
+      <div class="value" id="vTouch">未触摸</div>
+      <div class="hint">平滑值 ≥ 阈值时判定</div>
+    </div>
+    <div class="tile">
+      <div class="label">采样率</div>
+      <div class="value" id="vRate">–</div>
+      <div class="hint">次 / 秒</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="toolbar">
+      <div class="group">时间窗口
+        <div class="seg" id="winSeg">
+          <button data-win="10">10 秒</button>
+          <button data-win="30" class="active">30 秒</button>
+          <button data-win="60">60 秒</button>
+        </div>
+      </div>
+      <div class="group">触摸阈值
+        <input type="range" id="thr" min="5" max="500" step="5" value="40">
+        <span class="thr-val" id="thrVal">40</span>
+      </div>
+      <div class="group">
+        <button class="btn" id="btnPause" disabled>暂停</button>
+        <button class="btn" id="btnReset" disabled title="向板子发送 r,重置基线和滤波器">重置基线</button>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--series-1)"></i>原始值</span>
+      <span><i style="background:var(--series-2)"></i>平滑值</span>
+      <span><i class="dash"></i>触摸阈值</span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="chart"></canvas>
+      <div class="empty" id="empty">点右上角"连接串口",在弹出的列表里选择 XIAO 的串口(通常叫 usbmodem 或 USB Serial)。</div>
+      <div class="tip" id="tip"></div>
+    </div>
+  </section>
+
+  <div class="foot" id="foot">
+    需要 Chrome、Edge 或 Opera 桌面版。串口同一时间只能被一个程序占用,请先关闭 Arduino IDE 的串口监视器。
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const canvas = $('chart'), ctx = canvas.getContext('2d');
+  const tip = $('tip');
+  let samples = [];          // {t, raw, smooth}
+  let windowSec = 30;
+  let threshold = 40;
+  let paused = false;
+  let hoverX = null;
+  let errCount = 0;
+  let lastRateCalc = 0, rateCount = 0;
+
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  // ---------- Web Serial ----------
+  const BAUD = 115200;
+  let port = null, reader = null, writer = null, keepReading = false;
+  const encoder = new TextEncoder();
+
+  function notice(html) {
+    const el = $('notice');
+    el.innerHTML = html || '';
+    el.classList.toggle('show', !!html);
+  }
+
+  if (!('serial' in navigator)) {
+    notice('<b>这个浏览器不支持 Web Serial。</b> 请用 Chrome、Edge 或 Opera 的桌面版打开本页面。Safari 和 Firefox 不支持,手机浏览器也不支持。');
+    $('btnConnect').disabled = true;
+  } else if (!window.isSecureContext) {
+    notice('<b>当前页面不是安全上下文。</b> Web Serial 只能在 https://、localhost 或本地文件(file://)下使用。');
+    $('btnConnect').disabled = true;
+  }
+
+  function portLabel(p) {
+    try {
+      const info = p.getInfo();
+      if (info.usbVendorId != null) {
+        return `USB ${info.usbVendorId.toString(16).padStart(4, '0')}:${(info.usbProductId || 0).toString(16).padStart(4, '0')}`;
+      }
+    } catch (e) {}
+    return '串口';
+  }
+
+  function setStatus(state, text) {
+    const el = $('status');
+    el.className = 'pill ' + state;
+    $('statusText').textContent = text;
+    const connected = state === 'ok';
+    $('btnReset').disabled = !connected;
+    $('btnPause').disabled = !connected;
+    $('btnConnect').textContent = connected ? '断开' : '连接串口';
+    $('btnConnect').classList.toggle('primary', !connected);
+    $('empty').style.display = connected ? 'none' : '';
+  }
+
+  async function openPort(p) {
+    port = p;
+    await port.open({ baudRate: BAUD });
+    writer = port.writable.getWriter();
+    keepReading = true;
+    setStatus('ok', '已连接 ' + portLabel(port));
+    notice('');
+    $('foot').textContent = '已连接。数值为 -2 表示 D3 没有收到 D2 的信号,请检查接线。';
+    readLoop();
+  }
+
+  async function connect() {
+    try {
+      const p = await navigator.serial.requestPort();
+      await openPort(p);
+    } catch (e) {
+      if (e && e.name === 'NotFoundError') return; // 用户取消了选择
+      notice('<b>连接失败:</b> ' + (e && e.message ? e.message : e) + '。如果提示端口被占用,请关闭 Arduino IDE 串口监视器或其他读串口的程序。');
+      await cleanup();
+    }
+  }
+
+  async function disconnect() {
+    keepReading = false;
+    try { if (reader) await reader.cancel(); } catch (e) {}
+    await cleanup();
+  }
+
+  async function cleanup() {
+    try { if (writer) { writer.releaseLock(); } } catch (e) {}
+    writer = null;
+    try { if (port) await port.close(); } catch (e) {}
+    port = null;
+    setStatus('bad', '未连接');
+  }
+
+  async function readLoop() {
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (port && port.readable && keepReading) {
+      reader = port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, idx).trim();
+            buf = buf.slice(idx + 1);
+            if (line) handleLine(line);
+          }
+          if (buf.length > 4096) buf = '';
+        }
+      } catch (e) {
+        // 设备被拔掉或读取出错,跳出并清理
+        keepReading = false;
+      } finally {
+        try { reader.releaseLock(); } catch (e) {}
+        reader = null;
+      }
+    }
+    if (port) {
+      await cleanup();
+      setStatus('warn', '连接已断开');
+      $('foot').textContent = '串口断开了。重新插好板子后点"连接串口"。';
+    }
+  }
+
+  function handleLine(line) {
+    const parts = line.split(',');
+    if (parts.length !== 2) return;
+    const raw = parseInt(parts[0], 10), smooth = parseInt(parts[1], 10);
+    if (Number.isNaN(raw) || Number.isNaN(smooth)) return;
+    onSample({ t: Date.now() / 1000, raw, smooth });
+  }
+
+  async function sendReset() {
+    if (!writer) return;
+    const b = $('btnReset'); b.disabled = true; b.textContent = '已发送…';
+    try { await writer.write(encoder.encode('r')); samples = []; } catch (e) {}
+    setTimeout(() => { b.disabled = !writer; b.textContent = '重置基线'; }, 600);
+  }
+
+  $('btnConnect').addEventListener('click', () => port ? disconnect() : connect());
+  $('btnReset').addEventListener('click', sendReset);
+
+  if ('serial' in navigator) {
+    navigator.serial.addEventListener('disconnect', e => {
+      if (port && e.target === port) { keepReading = false; }
+    });
+    // 之前授权过的串口在页面打开时自动重连
+    navigator.serial.getPorts().then(async ports => {
+      if (ports.length === 1 && !port) {
+        try { await openPort(ports[0]); }
+        catch (e) { /* 板子可能没插,静默忽略 */ await cleanup(); }
+      }
+    }).catch(() => {});
+  }
+
+  // ---------- data ----------
+  function onSample(m) {
+    rateCount++;
+    const now = performance.now();
+    if (now - lastRateCalc > 1000) {
+      $('vRate').textContent = Math.round(rateCount * 1000 / (now - lastRateCalc));
+      rateCount = 0; lastRateCalc = now;
+    }
+    if (m.raw < 0) {
+      errCount++;
+      $('vRaw').textContent = m.raw; $('vSmooth').textContent = m.smooth;
+      $('foot').textContent = `收到错误码 ${m.raw}(第 ${errCount} 次):D3 在 50 ms 内没有翻转电平,通常是接线断开或电阻过大。`;
+      setTouch(false);
+      return;
+    }
+    if (paused) return;
+    samples.push(m);
+    const cutoff = m.t - 65;
+    while (samples.length && samples[0].t < cutoff) samples.shift();
+    $('vRaw').textContent = m.raw;
+    $('vSmooth').textContent = m.smooth;
+    setTouch(m.smooth >= threshold);
+  }
+  function setTouch(on) {
+    $('tileTouch').classList.toggle('on', on);
+    $('vTouch').textContent = on ? '触摸中' : '未触摸';
+  }
+
+  // ---------- controls ----------
+  $('winSeg').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    windowSec = +b.dataset.win;
+    [...$('winSeg').children].forEach(x => x.classList.toggle('active', x === b));
+  });
+  $('thr').addEventListener('input', e => { threshold = +e.target.value; $('thrVal').textContent = threshold; });
+  $('btnPause').addEventListener('click', () => {
+    paused = !paused;
+    $('btnPause').textContent = paused ? '继续' : '暂停';
+  });
+
+  // ---------- chart ----------
+  function resize() {
+    const r = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const PAD = { l: 44, r: 12, t: 10, b: 24 };
+  function draw() {
+    const W = canvas.getBoundingClientRect().width, H = canvas.getBoundingClientRect().height;
+    ctx.clearRect(0, 0, W, H);
+    const now = samples.length ? samples[samples.length - 1].t : Date.now() / 1000;
+    const t0 = now - windowSec;
+    const vis = samples.filter(s => s.t >= t0);
+    let maxV = threshold;
+    for (const s of vis) { if (s.raw > maxV) maxV = s.raw; if (s.smooth > maxV) maxV = s.smooth; }
+    maxV = niceCeil(maxV * 1.15);
+    const minV = 0;
+    const pw = W - PAD.l - PAD.r, ph = H - PAD.t - PAD.b;
+    const x = t => PAD.l + (t - t0) / windowSec * pw;
+    const y = v => PAD.t + ph - (v - minV) / (maxV - minV) * ph;
+
+    ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+    ctx.fillStyle = css('--text-muted'); ctx.font = '11px -apple-system, sans-serif';
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    const steps = 4;
+    for (let i = 0; i <= steps; i++) {
+      const v = minV + (maxV - minV) * i / steps;
+      const yy = y(v);
+      ctx.beginPath(); ctx.moveTo(PAD.l, yy); ctx.lineTo(W - PAD.r, yy); ctx.stroke();
+      ctx.fillText(Math.round(v), PAD.l - 6, yy);
+    }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    const xt = windowSec <= 10 ? 2 : windowSec <= 30 ? 5 : 10;
+    for (let s = 0; s <= windowSec; s += xt) {
+      const xx = x(now - s);
+      ctx.fillText(s === 0 ? '现在' : `-${s}s`, xx, PAD.t + ph + 6);
+    }
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = css('--threshold'); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(PAD.l, y(threshold)); ctx.lineTo(W - PAD.r, y(threshold)); ctx.stroke();
+    ctx.setLineDash([]);
+
+    const line = (key, color, width) => {
+      if (vis.length < 2) return;
+      ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath();
+      vis.forEach((s, i) => { const px = x(s.t), py = y(s[key]); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+      ctx.stroke();
+    };
+    line('raw', css('--series-1'), 1.25);
+    line('smooth', css('--series-2'), 2);
+
+    if (hoverX != null && vis.length) {
+      const ht = t0 + (hoverX - PAD.l) / pw * windowSec;
+      let best = vis[0], bd = Infinity;
+      for (const s of vis) { const d = Math.abs(s.t - ht); if (d < bd) { bd = d; best = s; } }
+      const hx = x(best.t);
+      ctx.strokeStyle = css('--text-muted'); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(hx, PAD.t); ctx.lineTo(hx, PAD.t + ph); ctx.stroke();
+      for (const [k, c] of [['raw', '--series-1'], ['smooth', '--series-2']]) {
+        ctx.beginPath(); ctx.arc(hx, y(best[k]), 4, 0, Math.PI * 2);
+        ctx.fillStyle = css(c); ctx.fill();
+        ctx.strokeStyle = css('--surface-1'); ctx.lineWidth = 2; ctx.stroke();
+      }
+      tip.style.display = 'block';
+      tip.innerHTML = `<div class="t">${(now - best.t).toFixed(2)} 秒前</div>
+        <div class="row"><i style="background:${css('--series-1')}"></i>原始值 <b>${best.raw}</b></div>
+        <div class="row"><i style="background:${css('--series-2')}"></i>平滑值 <b>${best.smooth}</b></div>`;
+      const tw = tip.offsetWidth;
+      tip.style.left = (hx + 12 + tw > W ? hx - 12 - tw : hx + 12) + 'px';
+      tip.style.top = '8px';
+    } else {
+      tip.style.display = 'none';
+    }
+    requestAnimationFrame(draw);
+  }
+  function niceCeil(v) {
+    if (v <= 10) return 10;
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    const m = v / p;
+    const n = m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10;
+    return n * p;
+  }
+  canvas.addEventListener('mousemove', e => { hoverX = e.clientX - canvas.getBoundingClientRect().left; });
+  canvas.addEventListener('mouseleave', () => { hoverX = null; });
+  canvas.addEventListener('touchmove', e => { hoverX = e.touches[0].clientX - canvas.getBoundingClientRect().left; }, { passive: true });
+  canvas.addEventListener('touchend', () => { hoverX = null; });
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
